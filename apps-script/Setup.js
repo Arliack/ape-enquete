@@ -97,6 +97,22 @@ function preparerClasses_(ss) {
 function preparerReponses_(ss) {
   var sh = obtenirOnglet_(ss, ONGLETS.REPONSES);
   var entetes = ENTETES_FIXES.concat(getColonnesQuestionnaire_().map(function (c) { return c.entete; }));
+
+  // Questionnaire modifié ? Sans réponse on peut reconstruire l'en-tête ; avec des réponses on refuse,
+  // car les colonnes seraient décalées et les anciennes données deviendraient fausses.
+  var largeur = sh.getLastColumn();
+  var actuels = largeur > 0 ? sh.getRange(1, 1, 1, largeur).getValues()[0] : [];
+  var identique = actuels.length === entetes.length && entetes.every(function (e, i) { return actuels[i] === e; });
+  var vide = actuels.every(function (v) { return v === ''; });
+  if (!identique && !vide) {
+    if (sh.getLastRow() > 1) {
+      throw new Error("Le questionnaire a changé alors que l'onglet « " + ONGLETS.REPONSES
+        + " » contient déjà des réponses : les colonnes seraient décalées. "
+        + "Sauvegardez ou supprimez ces réponses (lignes 2 et suivantes), puis relancez.");
+    }
+    sh.getRange(1, 1, 1, Math.max(largeur, entetes.length)).clearContent();
+  }
+
   var r = sh.getRange(1, 1, 1, entetes.length);
   r.setValues([entetes]);
   styleEntete_(r);

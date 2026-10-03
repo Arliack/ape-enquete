@@ -49,8 +49,7 @@ var THEMES_SOURCE = [
       "Action sur ce qu'est la puberté",
       'Action sur les moyens de contraception',
       'Action stop aux discriminations',
-      'Action sur le sexisme',
-      "Action sur l'éducation aux médias"
+      'Action sur le sexisme'
     ]
   },
   {
