@@ -1,6 +1,7 @@
 /**
- * Initialisation des onglets. Idempotent : peut être relancé sans perdre de réponses.
- * Menu : « Enquête APE > Initialiser / mettre à jour les onglets ».
+ * Publication du questionnaire et mise en place des onglets. Peut être relancé à volonté tant que
+ * les questions ne changent pas après l'arrivée de réponses.
+ * Menu : « Enquête APE > Publier le questionnaire / mettre à jour les onglets ».
  */
 
 var COULEUR_ENTETE = '#1f4e79';
@@ -8,7 +9,7 @@ var COULEUR_ENTETE = '#1f4e79';
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Enquête APE')
-    .addItem('Initialiser / mettre à jour les onglets', 'installer')
+    .addItem('Publier le questionnaire / mettre à jour les onglets', 'installer')
     .addToUi();
 }
 
@@ -43,16 +44,83 @@ function loc_(f) {
   return out;
 }
 
+/**
+ * Publie le questionnaire : lit les thèmes et actions de l'onglet « Résultats » (colonnes A et B),
+ * les fige pour le formulaire, puis reconstruit les onglets qui en dépendent.
+ * Rien n'est enregistré si le contrôle de « Réponses » échoue (réponses déjà reçues et questions changées).
+ */
 function installer() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   detecterSeparateur_(ss);
   preparerClasses_(ss);
-  preparerReponses_(ss);
-  preparerAutres_(ss);
-  preparerResultats_(ss);   // lève une erreur explicite si les lignes ne correspondent pas
-  preparerStats_(ss);
-  SpreadsheetApp.flush();
-  alerte_('Onglets prêts. Les statistiques se mettent à jour toutes seules à chaque réponse.');
+
+  var lu = lireQuestionnaireDepuisResultats_(ss);
+  QUESTIONNAIRE_EN_COURS_ = lu.themes;
+  try {
+    preparerReponses_(ss);    // peut refuser : on n'a encore rien publié
+    PropertiesService.getScriptProperties().setProperty(CLE_QUESTIONNAIRE, JSON.stringify(lu.themes));
+
+    preparerAutres_(ss);
+    preparerResultats_(ss, lu.lignes);
+    preparerStats_(ss);
+    SpreadsheetApp.flush();
+  } finally {
+    QUESTIONNAIRE_EN_COURS_ = null;
+  }
+
+  var nbQuestions = lu.themes.reduce(function (n, t) { return n + t.actions.length; }, 0);
+  alerte_('Questionnaire publié : ' + nbQuestions + ' questions notées dans ' + lu.themes.length
+    + ' thèmes. Le formulaire en ligne est à jour. Les statistiques se mettent à jour à chaque réponse.');
+}
+
+/**
+ * Lit l'onglet « Résultats » : colonne A = thème (cellules fusionnées ou répétées), colonne B = action.
+ * Une ligne « Autres propositions » (texte libre) est reconnue à son libellé. Les lignes vides sont ignorées.
+ * @return {{themes: Array, lignes: Object}} questionnaire avec identifiants, et ligne de chaque id.
+ */
+function lireQuestionnaireDepuisResultats_(ss) {
+  var sh = ss.getSheetByName(ONGLETS.RESULTATS);
+  if (!sh) throw new Error("Onglet « " + ONGLETS.RESULTATS + " » introuvable.");
+  var n = sh.getLastRow() - 1;
+  if (n < 1) throw new Error("L'onglet « " + ONGLETS.RESULTATS + " » ne contient aucune question.");
+
+  var vals = sh.getRange(2, 1, n, 2).getValues();
+  var sources = [];       // { titre, actions[], autres, rowsActions[], rowAutres }
+  var courant = null;
+  vals.forEach(function (r, i) {
+    var row = i + 2;
+    var theme = String(r[0]).trim();
+    var libelle = String(r[1]).trim();
+    if (theme !== '' && (!courant || theme !== courant.titre)) {
+      courant = { titre: theme, actions: [], autres: false, rowsActions: [], rowAutres: null };
+      sources.push(courant);
+    }
+    if (libelle === '') return;
+    if (!courant) throw new Error('Onglet Résultats, ligne ' + row + ' : aucun thème indiqué en colonne A.');
+    if (norm_(libelle).indexOf('autres propositions') === 0) {
+      if (courant.autres) throw new Error('Onglet Résultats, ligne ' + row + ' : deux lignes « Autres propositions » dans le thème « ' + courant.titre + ' ».');
+      courant.autres = true;
+      courant.rowAutres = row;
+    } else {
+      courant.actions.push(libelle);
+      courant.rowsActions.push(row);
+    }
+  });
+
+  if (!sources.length) throw new Error("Aucun thème trouvé dans l'onglet « " + ONGLETS.RESULTATS + " ».");
+  sources.forEach(function (s) {
+    if (!s.actions.length) throw new Error('Le thème « ' + s.titre + ' » ne contient aucune action à noter.');
+  });
+
+  var themes = construireQuestionnaire_(sources);
+  if (JSON.stringify(themes).length > 8000) throw new Error('Questionnaire trop long pour être enregistré (8 000 caractères max).');
+
+  var lignes = {};
+  themes.forEach(function (t, i) {
+    t.actions.forEach(function (a, j) { lignes[a.id] = sources[i].rowsActions[j]; });
+    if (t.autres) lignes[t.autres.id] = sources[i].rowAutres;
+  });
+  return { themes: themes, lignes: lignes };
 }
 
 function alerte_(msg) {
@@ -85,7 +153,7 @@ function preparerClasses_(ss) {
   sh.getRange(2, 1, lignes.length, 2).setValues(lignes);
   sh.getRange(1, 4).setValue(
     'Une classe par ligne. Après toute modification, relancer '
-    + '« Enquête APE > Initialiser / mettre à jour les onglets » pour mettre à jour les statistiques.'
+    + '« Enquête APE > Publier le questionnaire / mettre à jour les onglets » pour mettre à jour les statistiques.'
   ).setFontStyle('italic').setWrap(false);
   sh.setFrozenRows(1);
   sh.setColumnWidth(1, 70);
@@ -151,56 +219,43 @@ function norm_(s) {
 
 /**
  * Remplit C:I de l'onglet « Résultats » avec des formules vivantes.
- * Les lignes de l'onglet (colonne B) doivent suivre l'ordre du questionnaire (Config.js).
+ * @param {Object} lignes ligne de l'onglet pour chaque id de question (voir lireQuestionnaireDepuisResultats_).
  */
-function preparerResultats_(ss) {
+function preparerResultats_(ss, lignes) {
   var sh = ss.getSheetByName(ONGLETS.RESULTATS);
   if (!sh) throw new Error("Onglet « " + ONGLETS.RESULTATS + " » introuvable.");
 
-  var cols = getColonnesQuestionnaire_();
-  var existants = sh.getRange(2, 2, cols.length, 1).getValues();
-  cols.forEach(function (c, i) {
-    if (norm_(existants[i][0]) !== norm_(c.libelle)) {
-      throw new Error('Onglet Résultats, ligne ' + (i + 2) + ' : « ' + existants[i][0]
-        + ' » trouvé, « ' + c.libelle + ' » attendu (thème ' + c.theme + ').');
-    }
-  });
-
   var offset = ENTETES_FIXES.length;               // 1re colonne du questionnaire = offset + 1
   var rep = "'" + ONGLETS.REPONSES + "'!";
-  var formules = [];
-  cols.forEach(function (c, i) {
-    var row = i + 2;
+  getColonnesQuestionnaire_().forEach(function (c, i) {
+    var row = lignes[c.id];
     var L = lettreColonne_(offset + i + 1);
     var rng = rep + L + '2:' + L;
     var n = 'COUNTA(' + rng + ')';
+    var zone = sh.getRange(row, 3, 1, 7);
+
     if (c.type === 'texte') {
-      formules.push([
-        '=' + n + '&" proposition(s) – voir l\'onglet « ' + ONGLETS.AUTRES + ' »"',
+      zone.setFormulas([[
+        loc_('=' + n + '&" proposition(s) – voir l\'onglet « ' + ONGLETS.AUTRES + ' »"'),
         '', '', '', '', '', ''
-      ]);
+      ]]);
+      sh.getRange(row, 3).setHorizontalAlignment('left');
       return;
     }
+
     var pct = function (choix) {
       return '=IF(' + n + '=0,"",ROUND(COUNTIF(' + rng + ',"' + choix + '")/' + n + '*100,0))';
     };
     var plage = 'C' + row + ':F' + row;
-    formules.push([
+    zone.setFormulas([[
       pct(CHOIX[0]), pct(CHOIX[1]), pct(CHOIX[2]), pct(CHOIX[3]),
       '=IF(' + n + '=0,"",SUM(' + plage + '))',
       '=IF(' + n + '=0,"",C' + row + '+D' + row + ')',
       '=IF(' + n + '=0,"",IF(COUNTIF(' + plage + ',MAX(' + plage + '))>1,"Égalité",'
         + 'INDEX($C$1:$F$1,MATCH(MAX(' + plage + '),' + plage + ',0))))'
-    ]);
-  });
-
-  var zone = sh.getRange(2, 3, cols.length, 7);
-  zone.setFormulas(formules.map(function (ligne) { return ligne.map(loc_); }));
-  zone.setHorizontalAlignment('center');
-  // Pourcentages entiers ; la ligne « Autres propositions » reste en texte.
-  cols.forEach(function (c, i) {
-    if (c.type === 'choix') sh.getRange(i + 2, 3, 1, 6).setNumberFormat('0"%"');
-    else sh.getRange(i + 2, 3).setHorizontalAlignment('left');
+    ].map(loc_)]);
+    zone.setHorizontalAlignment('center');
+    sh.getRange(row, 3, 1, 6).setNumberFormat('0"%"');   // pourcentages entiers
   });
 
   sh.getRange('K1').setValue('Nombre de réponses').setFontWeight('bold');

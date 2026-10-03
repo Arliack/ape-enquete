@@ -59,7 +59,8 @@ var THEMES_SOURCE = [
       'Programme lutte contre le harcèlement',
       'Action sur les réseaux sociaux',
       "Action sur l'éducation aux médias",
-      "Action sur l'égalité des sexes"
+      "Action sur l'égalité des sexes",
+      "Action sur l'inclusion du handicap"
     ]
   },
   {
@@ -92,9 +93,19 @@ var THEMES_SOURCE = [
   }
 ];
 
-/** Questionnaire avec identifiants stables (t1a1 = thème 1, action 1 ; t1p = propositions du thème 1). */
-function getQuestionnaire_() {
-  return THEMES_SOURCE.map(function (t, i) {
+/**
+ * Le questionnaire « publié » est une copie figée de l'onglet Résultats, enregistrée par
+ * « Enquête APE > Publier le questionnaire » (voir Setup.js). Le formulaire ne lit donc jamais
+ * l'onglet en direct : modifier une ligne du Sheet ne change rien tant qu'on n'a pas publié, ce qui
+ * évite de décaler les colonnes de « Réponses » en pleine enquête.
+ * THEMES_SOURCE ne sert que de questionnaire de départ tant que rien n'a été publié.
+ */
+var CLE_QUESTIONNAIRE = 'QUESTIONNAIRE';
+var QUESTIONNAIRE_EN_COURS_ = null;   // utilisé pendant la publication, avant l'enregistrement
+
+/** Structure avec identifiants (t1a1 = thème 1, action 1 ; t1p = propositions du thème 1). */
+function construireQuestionnaire_(themesSource) {
+  return themesSource.map(function (t, i) {
     var tid = 't' + (i + 1);
     return {
       id: tid,
@@ -105,6 +116,12 @@ function getQuestionnaire_() {
       autres: t.autres ? { id: tid + 'p', libelle: 'Autres propositions' } : null
     };
   });
+}
+
+function getQuestionnaire_() {
+  if (QUESTIONNAIRE_EN_COURS_) return QUESTIONNAIRE_EN_COURS_;
+  var brut = PropertiesService.getScriptProperties().getProperty(CLE_QUESTIONNAIRE);
+  return brut ? JSON.parse(brut) : construireQuestionnaire_(THEMES_SOURCE);
 }
 
 /**
@@ -129,7 +146,7 @@ function getColonnesQuestionnaire_() {
 /** Lit la liste des classes dans l'onglet « Classes » (modifiable par l'APE sans redéployer). */
 function lireClasses_() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ONGLETS.CLASSES);
-  if (!sh) throw new Error("Onglet « " + ONGLETS.CLASSES + " » introuvable : lancer Enquête APE > Initialiser.");
+  if (!sh) throw new Error("Onglet « " + ONGLETS.CLASSES + " » introuvable : lancer Enquête APE > Publier le questionnaire.");
   var n = sh.getLastRow() - 1;
   if (n < 1) return [];
   return sh.getRange(2, 1, n, 2).getValues()

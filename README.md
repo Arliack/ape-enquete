@@ -31,7 +31,7 @@ Dans le Sheet : **Extensions > Apps Script**, puis copier `apps-script/*.js` et 
 `appsscript.json`** : `clasp create` l'écrase avec un fichier par défaut sans bloc `webapp`).
 
 1. Recharger le Sheet : le menu **Enquête APE** apparaît.
-2. **Enquête APE > Initialiser / mettre à jour les onglets** (autoriser le script la 1re fois).
+2. **Enquête APE > Publier le questionnaire / mettre à jour les onglets** (autoriser le script la 1re fois).
 3. Onglet **Classes** : vérifier la liste des classes (modifiable à tout moment, puis relancer l'étape 2).
 4. **Déployer > Nouveau déploiement > Application web** : exécuter en tant que *Moi*, accès *Tout le monde*.
    Copier l'URL se terminant par `/exec`.
@@ -50,10 +50,17 @@ sinon l'URL change et `docs/config.js` doit être mis à jour.
 
 ## Modifier le questionnaire
 
-Les thèmes/actions sont définis dans `apps-script/Config.js` (`THEMES_SOURCE`). Le formulaire les lit
-au chargement, donc rien à changer côté front. Les lignes de l'onglet **Résultats** doivent suivre le
-même ordre : `installer()` s'arrête avec un message précis si une ligne ne correspond pas. Ne changer
-le questionnaire qu'avant l'ouverture : les colonnes de **Réponses** en dépendent.
+La source du questionnaire est l'onglet **Résultats** (colonne A = thème, colonne B = action). Pour
+ajouter, retirer ou renommer une question : modifier les lignes dans cet onglet (une ligne
+« Autres propositions : » par thème pour un champ texte libre), puis lancer
+**Enquête APE > Publier le questionnaire / mettre à jour les onglets**. Le formulaire en ligne ne change
+qu'à ce moment-là : modifier l'onglet seul n'a aucun effet sur lui.
+
+- **Avant l'ouverture** : modifiable à volonté, relancer la publication après chaque changement.
+- **Une fois des réponses reçues** : la publication refuse tout changement de questions, car les
+  colonnes de **Réponses** seraient décalées. Sauvegarder (ou supprimer) les réponses d'abord.
+- Le questionnaire publié est copié dans les propriétés du script (clé `QUESTIONNAIRE`) ;
+  `THEMES_SOURCE` dans `Config.js` ne sert que de questionnaire de départ.
 
 ## Tester en local sans toucher au Sheet
 

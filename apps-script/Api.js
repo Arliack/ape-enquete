@@ -123,7 +123,7 @@ function neutraliserFormule_(txt) {
 function enregistrerReponse_(r) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName(ONGLETS.REPONSES);
-  if (!sh) throw new Error("Onglet « " + ONGLETS.REPONSES + " » introuvable : lancer Enquête APE > Initialiser.");
+  if (!sh) throw new Error("Onglet « " + ONGLETS.REPONSES + " » introuvable : lancer Enquête APE > Publier le questionnaire.");
 
   var last = sh.getLastRow();
   if (last > 1) {
