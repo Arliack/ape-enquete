@@ -10,6 +10,8 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Enquête APE')
     .addItem('Publier le questionnaire / mettre à jour les onglets', 'installer')
+    .addSeparator()
+    .addItem('Réparer les titres de colonnes (sans toucher aux réponses)', 'synchroniserEntetes')
     .addToUi();
 }
 
@@ -71,6 +73,37 @@ function installer() {
   var nbQuestions = lu.themes.reduce(function (n, t) { return n + t.actions.length; }, 0);
   alerte_('Questionnaire publié : ' + nbQuestions + ' questions notées dans ' + lu.themes.length
     + ' thèmes. Le formulaire en ligne est à jour. Les statistiques se mettent à jour à chaque réponse.');
+}
+
+/** Deux questionnaires sont-ils les mêmes (thèmes, libellés, champs texte), à la casse et aux apostrophes près ? */
+function memeQuestionnaire_(a, b) {
+  if (a.length !== b.length) return false;
+  return a.every(function (t, i) {
+    var u = b[i];
+    return norm_(t.titre) === norm_(u.titre) && !!t.autres === !!u.autres
+      && t.actions.length === u.actions.length
+      && t.actions.every(function (x, j) { return norm_(x.libelle) === norm_(u.actions[j].libelle); });
+  });
+}
+
+/**
+ * Réparation : réécrit les titres de « Réponses » et les formules de « Résultats » d'après le
+ * questionnaire PUBLIÉ, c'est-à-dire celui du formulaire, donc celui qui a servi à enregistrer les réponses.
+ * Aucune réponse n'est modifiée. Refuse si l'onglet Résultats décrit un autre questionnaire.
+ */
+function synchroniserEntetes() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  detecterSeparateur_(ss);
+  var publie = getQuestionnaire_();
+  var lu = lireQuestionnaireDepuisResultats_(ss);
+  if (!memeQuestionnaire_(lu.themes, publie)) {
+    throw new Error("L'onglet « " + ONGLETS.RESULTATS + " » ne décrit pas le même questionnaire que le formulaire en ligne. "
+      + "Remettez-le comme dans le formulaire pour réparer, ou sauvegardez les réponses avant de publier une nouvelle version.");
+  }
+  preparerReponses_(ss, true);
+  preparerResultats_(ss, lu.lignes);
+  SpreadsheetApp.flush();
+  alerte_('Titres de colonnes et formules réparés. Aucune réponse n\'a été modifiée.');
 }
 
 /**
@@ -162,7 +195,7 @@ function preparerClasses_(ss) {
 
 // ---------------------------------------------------------------- Réponses
 
-function preparerReponses_(ss) {
+function preparerReponses_(ss, sansGarde) {
   var sh = obtenirOnglet_(ss, ONGLETS.REPONSES);
   var entetes = ENTETES_FIXES.concat(getColonnesQuestionnaire_().map(function (c) { return c.entete; }));
 
@@ -173,7 +206,7 @@ function preparerReponses_(ss) {
   var identique = actuels.length === entetes.length && entetes.every(function (e, i) { return actuels[i] === e; });
   var vide = actuels.every(function (v) { return v === ''; });
   if (!identique && !vide) {
-    if (sh.getLastRow() > 1) {
+    if (sh.getLastRow() > 1 && !sansGarde) {
       throw new Error("Le questionnaire a changé alors que l'onglet « " + ONGLETS.REPONSES
         + " » contient déjà des réponses : les colonnes seraient décalées. "
         + "Sauvegardez ou supprimez ces réponses (lignes 2 et suivantes), puis relancez.");
